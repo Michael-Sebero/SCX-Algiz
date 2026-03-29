@@ -34,8 +34,8 @@ git clone https://github.com/Michael-Sebero/SCX-IMPERATOR
 cd SCX-IMPERATOR && cargo build --release
 
 # Install
-sudo mv target/release/scx_imperator /usr/bin/
-chmod 755 /usr/scx_imperator
+sudo mv target/release/scx_imperator /bin/
+chmod 755 /bin/scx_imperator
 
 # Run (requires root)
 sudo scx_imperator
