@@ -2,13 +2,13 @@
 
 **Integrated · Multitiered · Priority · Execution · Ranked · Adaptive · Topology · Ordered · Runtime**
 
-> **ABSTRACT**: `scx_imperator` is a BPF CPU scheduler built on [sched_ext](https://github.com/sched-ext/scx), designed for **gaming workloads** on modern AMD and Intel hardware. It classifies every task by observed runtime behavior and routes work through a 4-tier priority system — high-priority tasks like audio callbacks and mouse input get CPU time first, bulk work like compilers gets it last.
+> **ABSTRACT**: `scx_imperator` is a BPF CPU scheduler built on [sched_ext](https://github.com/sched-ext/scx), designed for **gaming workloads** on modern AMD and Intel hardware. It classifies every task by observed runtime behavior and routes work through a 4-tier priority system high-priority tasks like audio callbacks and mouse input get CPU time first, bulk work like compilers gets it last.
 >
-> - **4-Tier Classification** — Tasks sorted by asymmetric EWMA avg_runtime into Critical / Interactive / Frame / Bulk
-> - **IRQ-Wake Boosting** — Hardware wakeups (GPU vsync, audio DMA, network) immediately promote that task to T0 for one dispatch
-> - **Waker Tier Inheritance** — High-priority task waking a lower-priority one lifts the wakee's tier, keeping producer-consumer chains tight
-> - **Lock-Holder Protection** — Futex holders get scheduling priority and starvation skips to release locks faster, unblocking waiters sooner
-> - **ETD Calibration** — Startup CAS ping-pong measures actual inter-core latency; work stealing always prefers the cheapest path
+> - **4-Tier Classification** Tasks sorted by asymmetric EWMA avg_runtime into Critical / Interactive / Frame / Bulk
+> - **IRQ-Wake Boosting** Hardware wakeups (GPU vsync, audio DMA, network) immediately promote that task to T0 for one dispatch
+> - **Waker Tier Inheritance** High-priority task waking a lower-priority one lifts the wakee's tier, keeping producer-consumer chains tight
+> - **Lock-Holder Protection** Futex holders get scheduling priority and starvation skips to release locks faster, unblocking waiters sooner
+> - **ETD Calibration** Startup CAS ping-pong measures actual inter-core latency; work stealing always prefers the cheapest path
 
 ## Navigation
 
@@ -53,18 +53,18 @@ sudo scx_imperator -p legacy
 
 ## 2. Philosophy
 
-Traditional schedulers (CFS, EEVDF) optimize for **fairness** — if a game and a compiler both run, each gets roughly 50% CPU time. For gaming, this creates two problems:
+Traditional schedulers (CFS, EEVDF) optimize for **fairness** if a game and a compiler both run, each gets roughly 50% CPU time. For gaming, this creates two problems:
 
 1. **Latency inversion**: A 50µs input handler waits behind a 50ms compile job
 2. **Frame jitter**: Game render threads get preempted mid-frame by background work
 
-**scx_imperator's answer**: Classify tasks by *behavior* (how long they actually run), not by type or nice value. Short-burst tasks (input, audio) get instant priority. Long-running tasks (compilers) get larger time slices but lower priority. The system self-tunes — no manual tagging or cgroup setup required.
+**scx_imperator's answer**: Classify tasks by *behavior* (how long they actually run), not by type or nice value. Short-burst tasks (input, audio) get instant priority. Long-running tasks (compilers) get larger time slices but lower priority. The system self-tunes no manual tagging or cgroup setup required.
 
 ---
 
 ## 3. 4-Tier System
 
-Every task is classified into one of four tiers based on its **EWMA** (Exponential Weighted Moving Average) runtime. Classification is automatic and continuous — tasks move between tiers as their behavior changes.
+Every task is classified into one of four tiers based on its **EWMA** (Exponential Weighted Moving Average) runtime. Classification is automatic and continuous tasks move between tiers as their behavior changes.
 
 ### Tier Gates
 
@@ -75,14 +75,14 @@ Every task is classified into one of four tiers based on its **EWMA** (Exponenti
 | **T2** | Frame | < 8ms | Game render threads, video encoding | 40ms |
 | **T3** | Bulk | ≥ 8ms | Compilation, background indexing | 100ms |
 
-T0 always runs before T1, which always runs before T2 and so on. This ordering is encoded directly in the dispatch queue sort key — no per-dispatch branching to enforce it.
+T0 always runs before T1, which always runs before T2 and so on. This ordering is encoded directly in the dispatch queue sort key no per-dispatch branching to enforce it.
 
 > [!TIP]
 > **No game task should be in T3.** Game render threads run 2–8ms per frame → T2. Physics/AI run 0.5–2ms → T1. Input handlers run < 100µs → T0. Only tasks doing 8ms+ of uninterrupted CPU work (shader compilation, loading screens) land in T3.
 
 ### How Classification Works
 
-1. **Initial placement**: Based on `nice` value — `nice < 0` → T0, `nice 0–10` → T1, `nice > 10` → T3. Kthreads at nice 0 start at T1, not T0.
+1. **Initial placement**: Based on `nice` value `nice < 0` → T0, `nice 0–10` → T1, `nice > 10` → T3. Kthreads at nice 0 start at T1, not T0.
 2. **Runtime seeding**: avg_runtime is seeded at the midpoint of the initial tier's expected range, not zero. Starting from zero lets any task with a short first bout masquerade as T0 for several windows.
 3. **EWMA authority**: After ~4 bouts, the EWMA avg_runtime becomes authoritative. A nice -5 task that runs 50ms bursts reclassifies to T3 regardless of nice value.
 4. **Asymmetric convergence**: Promotions (shorter runtime) converge in ~4 bouts; demotions (longer runtime) take ~16. A game thread that spikes during a level load recovers its T1 priority quickly.
@@ -104,11 +104,11 @@ Adapted from network CAKE's flow fairness algorithm:
 
 ## 4. Context Signals
 
-These three features fire on top of the base tier system. They don't modify a task's permanent classification — they affect one dispatch or one preemption decision at a time.
+These three features fire on top of the base tier system. They don't modify a task's permanent classification they affect one dispatch or one preemption decision at a time.
 
 ### IRQ-Wake Boost
 
-When a wakeup originates from a hardware interrupt, NMI, softirq, or ksoftirqd, the woken task runs at T0 for that one dispatch. The flag is consumed immediately. This matters because a task woken by a mouse click or audio DMA completion may not yet have a T0 EWMA history — the hardware urgency shouldn't wait for behavioral evidence to accumulate.
+When a wakeup originates from a hardware interrupt, NMI, softirq, or ksoftirqd, the woken task runs at T0 for that one dispatch. The flag is consumed immediately. This matters because a task woken by a mouse click or audio DMA completion may not yet have a T0 EWMA history the hardware urgency shouldn't wait for behavioral evidence to accumulate.
 
 ### Waker Tier Inheritance
 
@@ -118,13 +118,13 @@ On wakeup paths, the woken task's tier is compared against the tier of the CPU t
 
 Tracked via fexit probes on futex acquire/release. When a task holds a contended lock:
 
-1. Its virtual timestamp is advanced within its tier — it sorts to the front of same-tier tasks and runs sooner, releasing the lock faster
+1. Its virtual timestamp is advanced within its tier it sorts to the front of same-tier tasks and runs sooner, releasing the lock faster
 2. If it exceeds its starvation threshold while holding the lock, preemption is skipped up to 4 consecutive times. After 4 skips or after lock release, normal preemption resumes
 
 The cap of 4 skips bounds the maximum extra latency any waiter can experience to roughly 4ms at default tick rates. Slice expiry (the hard ceiling) is never bypassed.
 
 > [!NOTE]
-> **Coverage gaps**: Uncontended locks never enter the kernel and are invisible to this path. `FUTEX_CMP_REQUEUE_PI` (rare, primarily glibc priority-ceiling condition variables) is also not covered — the new lock owner won't get the boost until its next explicit futex acquire.
+> **Coverage gaps**: Uncontended locks never enter the kernel and are invisible to this path. `FUTEX_CMP_REQUEUE_PI` (rare, primarily glibc priority-ceiling condition variables) is also not covered the new lock owner won't get the boost until its next explicit futex acquire.
 
 ---
 
@@ -138,7 +138,7 @@ Three profiles are selectable at launch. `Default` is identical to `Gaming`.
 | **Esports** | 1ms | 4ms | 50ms | 0.25× | ~4× |
 | **Legacy** | 4ms | 12ms | 200ms | 0.75× | 2× |
 
-**Gaming** works well for most desktops. **Esports** tightens everything — shorter slices, half the starvation windows, lower T0 multiplier — use it for minimum latency above all else. **Legacy** leans toward fairness; background work completes at a more reasonable pace.
+**Gaming** works well for most desktops. **Esports** tightens everything shorter slices, half the starvation windows, lower T0 multiplier use it for minimum latency above all else. **Legacy** leans toward fairness; background work completes at a more reasonable pace.
 
 The `--starvation` flag scales all tier thresholds proportionally from the T3 base, preserving inter-tier ratios.
 
@@ -201,7 +201,7 @@ The **median** of samples is used (not the mean) to filter IRQ jitter. If affini
 
 Each LLC has its own dispatch queue. On a task dispatch:
 
-1. Try the calling CPU's local LLC first — covers most dispatches with zero cross-LLC traffic
+1. Try the calling CPU's local LLC first covers most dispatches with zero cross-LLC traffic
 2. If empty, build a steal mask of non-empty LLCs and try the lowest-ETD-cost one first
 3. Fall through remaining LLCs in order
 
@@ -215,7 +215,7 @@ When a T0 or T1 task is enqueued into a full LLC, a victim CPU in the same LLC i
 
 ## 8. Overhead
 
-The added cost relative to a minimal sched_ext skeleton is approximately 20%, concentrated in `select_cpu` and `enqueue`. The `dispatch` path — the tightest loop under sustained gaming load — is unchanged.
+The added cost relative to a minimal sched_ext skeleton is approximately 20%, concentrated in `select_cpu` and `enqueue`. The `dispatch` path the tightest loop under sustained gaming load is unchanged.
 
 | Function | Added cost | Notes |
 | :--- | :--- | :--- |
@@ -235,7 +235,7 @@ The added cost relative to a minimal sched_ext skeleton is approximately 20%, co
 
 | Term | Definition |
 | :--- | :--- |
-| **EWMA** | Exponential Weighted Moving Average. Tracks task runtime with asymmetric decay — promotions converge in ~4 bouts, demotions in ~16. |
+| **EWMA** | Exponential Weighted Moving Average. Tracks task runtime with asymmetric decay promotions converge in ~4 bouts, demotions in ~16. |
 | **Tier** | Classification level (T0–T3) by avg_runtime. Controls slice size, starvation window, vtime priority and DVFS target. |
 | **Deficit** | Per-task credit from DRR++. New tasks get bonus credit; exhaustion removes the bonus and the task competes normally. |
 | **Quantum** | Base time slice allotted before a scheduling decision. Scaled by tier multiplier. |
